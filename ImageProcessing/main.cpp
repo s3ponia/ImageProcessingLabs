@@ -11,6 +11,7 @@
 #include <fmt/format.h>
 
 #include "ImageCorrection/image_correction.hpp"
+#include "ImageProcessing/image_processing.hpp"
 #include "ImageResize/bilinear_interpolation.hpp"
 #include "ImageResize/nearest_neighbourd.hpp"
 
@@ -90,6 +91,9 @@ int main(int argc, char **argv) {
   program.add_argument("-t", "--type")
       .required()
       .help("specify the programm's behaviour: geo - prints image's geometry; "
+            "shift - add constant to all pixels in image; "
+            "mult - multiply by constant all pixels in image; "
+            "rotate - rotate images on 90 degree; "
             "recalc - recalculate image pixels to range [0;255]; "
             "resize - resize image; "
             "gamma - apply gamma correction");
@@ -115,7 +119,7 @@ int main(int argc, char **argv) {
             "logarithm");
 
   program.add_argument("-C")
-      .help("specify parameter for gamma correction")
+      .help("specify parameter for gamma correction, multipling and shifting")
       .scan<'g', double>()
       .default_value(1.);
 
@@ -145,6 +149,13 @@ int main(int argc, char **argv) {
 
   if (runtime_type == "geo") {
     PrintImageGeometry(image);
+  } else if (runtime_type == "shift") {
+    image = image_processing::AddConstant(image,
+                                          (uint8_t)program.get<double>("-C"));
+  } else if (runtime_type == "mult") {
+    image = image_processing::Mult(image, program.get<double>("-C"));
+  } else if (runtime_type == "rotate") {
+    image.rotate(270);
   } else if (runtime_type == "recalc") {
   } else if (runtime_type == "resize") {
     if (program.is_used("-ns")) {
