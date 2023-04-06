@@ -4,16 +4,20 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <random>
 #include <utility>
 
 #include <Magick++.h>
 #include <argparse/argparse.hpp>
 #include <fmt/format.h>
+#include <matplot/matplot.h>
 
 #include "ImageCorrection/image_correction.hpp"
+#include "ImageNoise/image_noise.hpp"
 #include "ImageProcessing/image_processing.hpp"
 #include "ImageResize/bilinear_interpolation.hpp"
 #include "ImageResize/nearest_neighbourd.hpp"
+#include "utility.hpp"
 
 void PrintImageGeometry(const Magick::Image &image) {
   Magick::Geometry geometry = image.size();
@@ -72,6 +76,14 @@ Magick::Image readFile(const std::filesystem::path &path,
     } else {
       throw std::logic_error{"geometry must be specified for .xcr files"};
     }
+  } else if (path.extension() == ".dat") {
+    if (geometry) {
+      return image_processing::VecToImage(
+          image_processing::FormImage(image_processing::ReadDataFile(path),
+                                      geometry->height(), geometry->width()));
+    } else {
+      throw std::logic_error{"geometry must be specified for .xcr files"};
+    }
   } else {
     return Magick::Image{path};
   }
@@ -87,16 +99,28 @@ int main(int argc, char **argv) {
   argparse::ArgumentParser program("ImageProcessing");
 
   program.add_argument("image_path").help("path to the image to work with");
+  program.add_argument("--ai").help(
+      "specify additional image_path for commands");
 
   program.add_argument("-t", "--type")
       .required()
-      .help("specify the programm's behaviour: geo - prints image's geometry; "
-            "shift - add constant to all pixels in image; "
-            "mult - multiply by constant all pixels in image; "
-            "rotate - rotate images on 90 degree; "
-            "recalc - recalculate image pixels to range [0;255]; "
-            "resize - resize image; "
-            "gamma - apply gamma correction");
+      .help(
+          "specify the programm's behaviour: geo - prints image's geometry; "
+          "shift - add constant to all pixels in image; "
+          "mult - multiply by constant all pixels in image; "
+          "rotate - rotate images on 90 degree; "
+          "recalc - recalculate image pixels to range [0;255]; "
+          "resize - resize image; "
+          "gamma - apply gamma correction; "
+          "equalize - equalize image; "
+          "diff - calc difference between images; "
+          "salt_noise - add salt noise to image; "
+          "norm_noise - add normed noise to image; "
+          "comb_noise - add salt + normed noises to image; "
+          "mean_antinoise - filter out noise from image with mean filter; "
+          "median_antinoise - filter out noise from image with median filter; "
+          "lab81; lab82; lab82_inverse; "
+          "lab91; lab92");
 
   program.add_argument("-s", "--size")
       .help("specify width and height: --size width height. Required *.xcr "
@@ -128,6 +152,11 @@ int main(int argc, char **argv) {
       .scan<'g', double>()
       .default_value(2.2);
 
+  program.add_argument("-R")
+      .help("specify parameter for noise filtering")
+      .scan<'u', unsigned int>()
+      .default_value(1.);
+
   program.add_argument("-o", "--output")
       .help("must be specified with image modifing functions");
 
@@ -144,8 +173,22 @@ int main(int argc, char **argv) {
                             ? std::optional{geometryFromVec(size_vec.value())}
                             : std::nullopt;
   const auto image_path = program.get<std::string>("image_path");
+  const auto additional_ip = [&]() -> std::optional<std::string> {
+    if (program.is_used("--ai")) {
+      return program.get<std::string>("--ai");
+    } else {
+      return std::nullopt;
+    }
+  }();
   const auto runtime_type = program.get<std::string>("--type");
   auto image = readFile(image_path, geometry);
+  const auto additional_image = [&]() -> std::optional<Magick::Image> {
+    if (additional_ip) {
+      return readFile(*additional_ip, geometry);
+    } else {
+      return std::nullopt;
+    }
+  }();
 
   if (runtime_type == "geo") {
     PrintImageGeometry(image);
@@ -190,6 +233,140 @@ int main(int argc, char **argv) {
       std::cerr << "Unhandled --gt: " << runtime_type << std::endl;
       return 1;
     }
+  } else if (runtime_type == "equalize") {
+    image = image_processing::Equalize(image);
+  } else if (runtime_type == "diff") {
+    if (!additional_image) {
+      std::cerr << "--ai: required for diff action" << std::endl;
+      return 1;
+    }
+    image = image_processing::Diff(image, *additional_image);
+  } else if (runtime_type == "salt_noise") {
+    image = image_processing::GenerateSaltNoise(image);
+  } else if (runtime_type == "norm_noise") {
+    image = image_processing::GenerateNormalNoise(image);
+  } else if (runtime_type == "comb_noise") {
+    image = image_processing::GenerateNormalNoise(
+        image_processing::GenerateSaltNoise(image));
+  } else if (runtime_type == "mean_antinoise") {
+    auto R = program.get<unsigned int>("-R");
+    image = image_processing::AntiNoiseMean(image, R);
+  } else if (runtime_type == "median_antinoise") {
+    auto R = program.get<unsigned int>("-R");
+    image = image_processing::AntiNoiseMedian(image, R);
+  } else if (runtime_type == "lab81") {
+    double A = 100;
+    double f = 50;
+    size_t N = 1024;
+    double dt = 0.001;
+
+    std::vector<double> x1 = matplot::linspace(0, 2 * matplot::pi, N);
+    auto y1 = image_processing::HarmFunction(A, f, N, dt);
+    auto [x2, y2] =
+        image_processing::SpecterFourier(image_processing::Fourier(y1), dt);
+    auto inverse_harm = image_processing::InverseFourier(
+        image_processing::FourierWithoutSquare(y1));
+    auto [x3, y3] = image_processing::SpecterFourier(
+        image_processing::Fourier(inverse_harm), dt);
+
+    matplot::tiledlayout(2, 2);
+    auto ax1 = matplot::nexttile();
+    matplot::plot(ax1, x1, y1);
+    matplot::title(ax1, "Harmonic func");
+
+    auto ax2 = matplot::nexttile();
+    matplot::plot(ax2, x2, y2);
+    matplot::title(ax2, "Fourier harm");
+
+    auto ax3 = matplot::nexttile();
+    matplot::plot(ax3, x1, inverse_harm);
+    matplot::title(ax3, "Invers Fourier harm");
+
+    auto ax4 = matplot::nexttile();
+    matplot::plot(ax4, x3, y3);
+    matplot::title(ax4, "Fourier specter inverse harm");
+
+    matplot::show();
+  } else if (runtime_type == "lab82") {
+    auto vec =
+        image_processing::Fourier2D(image_processing::ImageTo2dVec(image));
+    vec = image_processing::DiagonalShift2d(vec, vec.size() / 2,
+                                            vec[0].size() / 2);
+    image = image_processing::VecToImage(vec);
+    image = image_processing::LogCorrection(image, 6);
+  } else if (runtime_type == "lab82_inverse") {
+    auto vec = image_processing::Fourier2DWithoutSquare(
+        image_processing::ImageTo2dVec(image));
+    image =
+        image_processing::VecToImage(image_processing::InverseFourier2D(vec));
+  } else if (runtime_type == "lab91") {
+    auto [_, h] = image_processing::CreateHeartBeat();
+    std::vector<double> x_c(1000);
+    x_c[200] = 1 + 0.1;
+    x_c[400] = 1 - 0.1;
+    x_c[600] = 1 + 0.1;
+    x_c[800] = 1 - 0.1;
+
+    auto x = matplot::linspace(0, 1000, 1000);
+
+    auto y = image_processing::Convolution(x_c, h);
+    y.resize(1000);
+
+    matplot::tiledlayout(2, 2);
+    auto ax1 = matplot::nexttile();
+    matplot::plot(ax1, x, y);
+    matplot::title(ax1, "Normal Heartbeat");
+
+    auto ax2 = matplot::nexttile();
+    matplot::plot(ax2, x, x_c);
+
+    auto ax3 = matplot::nexttile();
+    auto y2 = image_processing::InverseFilter(y, h);
+    matplot::plot(ax3, matplot::linspace(0, y2.size(), y2.size()), y2);
+    matplot::title(ax3, "Inverse Normal Heartbeat");
+
+    matplot::show();
+
+    auto noised = y;
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(-1., 1.);
+
+    for (auto &el : noised) {
+      el += dis(gen);
+    }
+
+    matplot::tiledlayout(1, 2);
+    auto ax4 = matplot::nexttile();
+    matplot::plot(ax4, x, noised);
+    matplot::title(ax4, "Noised Heartbeat");
+
+    auto ax5 = matplot::nexttile();
+    auto y3 = image_processing::InverseFilter(noised, h);
+    matplot::plot(ax5, matplot::linspace(0, y3.size(), y3.size()), y3);
+    matplot::title(ax5, "Inverse Noised Heartbeat");
+
+    matplot::show();
+  } else if (runtime_type == "lab92") {
+    auto h_func = image_processing::ReadDataFile(
+        "/Users/v.shlyaga/ImageProcessingLabs/images/kern76D.dat");
+    h_func.resize(75);
+
+    matplot::plot(h_func);
+    matplot::show();
+  } else if (runtime_type == "lab92_inv") {
+    auto h_func = image_processing::ReadDataFile(
+        "/Users/v.shlyaga/ImageProcessingLabs/images/kern76D.dat");
+    
+    auto img_data = image_processing::ImageTo2dVec(image);
+    image = image_processing::VecToImage(image_processing::ImageRestore(img_data, h_func));
+  } else if (runtime_type == "lab92_inv_noised") {
+    auto h_func = image_processing::ReadDataFile(
+        "/Users/v.shlyaga/ImageProcessingLabs/images/kern76D.dat");
+    
+    auto img_data = image_processing::ImageTo2dVec(image);
+    image = image_processing::VecToImage(image_processing::ImageRestore(img_data, h_func, true, 0.1));
   } else {
     std::cerr << "Unhandled --type: " << runtime_type << std::endl;
     return 1;
