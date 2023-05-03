@@ -358,15 +358,117 @@ int main(int argc, char **argv) {
   } else if (runtime_type == "lab92_inv") {
     auto h_func = image_processing::ReadDataFile(
         "/Users/v.shlyaga/ImageProcessingLabs/images/kern76D.dat");
-    
+
     auto img_data = image_processing::ImageTo2dVec(image);
-    image = image_processing::VecToImage(image_processing::ImageRestore(img_data, h_func));
+    image = image_processing::VecToImage(
+        image_processing::ImageRestore(img_data, h_func));
   } else if (runtime_type == "lab92_inv_noised") {
     auto h_func = image_processing::ReadDataFile(
         "/Users/v.shlyaga/ImageProcessingLabs/images/kern76D.dat");
-    
+
     auto img_data = image_processing::ImageTo2dVec(image);
-    image = image_processing::VecToImage(image_processing::ImageRestore(img_data, h_func, true, 0.1));
+    image = image_processing::VecToImage(
+        image_processing::ImageRestore(img_data, h_func, true, 0.1));
+  } else if (runtime_type == "lab10_1") {
+    auto vec = image_processing::Fourier2DWithoutSquare(
+        image_processing::ImageTo2dVec(image), false);
+
+    const auto c_param = program.get<double>("-C");
+
+    vec = image_processing::Upsize2dVec(vec, c_param);
+
+    image =
+        image_processing::VecToImage(image_processing::InverseFourier2D(vec));
+  } else if (runtime_type == "lab10_2") {
+    auto vec = image_processing::ImageTo2dVec(image);
+
+    const auto c_param = program.get<double>("-C");
+
+    const auto fc = c_param * 0.5;
+    const std::size_t m = 64;
+
+    // auto lpf_data = image_processing::LpfData(fc, m);
+    // vec = image_processing::PassFilter2d(vec, lpf_data, m);
+
+    vec = image_processing::Fourier2DWithoutSquare(vec);
+
+    vec = image_processing::Downsize2dVec(vec, c_param);
+
+    image =
+        image_processing::VecToImage(image_processing::InverseFourier2D(vec));
+  } else if (runtime_type == "lab12_1p") {
+    std::vector<std::vector<double>> kernel_x = {
+        {-1, -1, -1}, {0, 0, 0}, {1, 1, 1}};
+
+    std::vector<std::vector<double>> kernel_y = {
+        {-1, 0, 1}, {-1, 0, 1}, {-1, 0, 1}};
+
+    auto vec = image_processing::ImageTo2dVec(image);
+
+    vec = image_processing::Convolution2D(vec, kernel_x, kernel_y);
+    image_processing::ThresholdOp(vec);
+
+    image = image_processing::VecToImage(vec);
+  } else if (runtime_type == "lab12_1s") {
+    std::vector<std::vector<double>> kernel_x = {
+        {-1, -2, -1}, {0, 0, 0}, {1, 2, 1}};
+
+    std::vector<std::vector<double>> kernel_y = {
+        {-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}};
+
+    auto vec = image_processing::ImageTo2dVec(image);
+
+    vec = image_processing::Convolution2D(vec, kernel_x, kernel_y);
+    image_processing::ThresholdOp(vec);
+
+    image = image_processing::VecToImage(vec);
+  } else if (runtime_type == "lab12_1l") {
+    std::vector<std::vector<double>> kernel_x = {
+        {1, 1, 1}, {1, -8, 1}, {1, 1, 1}};
+
+    // std::vector<std::vector<double>> kernel_y = {
+    //     {-1, -1, -1}, {-1, 8, -1}, {-1, -1, -1}};
+    std::vector<std::vector<double>> kernel_y(3, std::vector<double>(3));
+
+    auto vec = image_processing::ImageTo2dVec(image);
+
+    vec = image_processing::Convolution2D(vec, kernel_x, kernel_y);
+    image_processing::ThresholdOp(vec);
+
+    image = image_processing::VecToImage(vec);
+  } else if (runtime_type == "lab12_2") {
+    std::vector<std::vector<double>> kernel_x = {
+        {1, 1, 1}, {1, -8, 1}, {1, 1, 1}};
+
+    std::vector<std::vector<double>> kernel_y = {
+        {-1, -1, -1}, {-1, 8, -1}, {-1, -1, -1}};
+
+    auto vec = image_processing::ImageTo2dVec(image);
+    const auto cp = vec;
+
+    vec = image_processing::Convolution2D(vec, kernel_x, kernel_y);
+
+    image = image_processing::VecToImage(image_processing::DiffModel(cp, vec));
+  } else if (runtime_type == "lab13_eros") {
+    auto vec = image_processing::ImageTo2dVec(image);
+
+    image_processing::ThresholdOp(vec);
+
+    auto cp = vec;
+
+    vec = image_processing::Erode(vec, 3);
+
+    image = image_processing::VecToImage(image_processing::DiffModel(cp, vec));
+  } else if (runtime_type == "lab13_dilate") {
+    auto vec = image_processing::ImageTo2dVec(image);
+
+    image_processing::ThresholdOp(vec);
+
+    auto cp = vec;
+
+    vec = image_processing::Dilate(vec, 3);
+
+    image = image_processing::VecToImage(image_processing::DiffModel(cp, vec));
   } else {
     std::cerr << "Unhandled --type: " << runtime_type << std::endl;
     return 1;

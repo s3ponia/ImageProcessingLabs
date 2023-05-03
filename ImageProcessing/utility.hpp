@@ -10,7 +10,8 @@
 #include <vector>
 
 namespace image_processing {
-
+std::vector<double> Convolution(const std::vector<double> &data1,
+                                const std::vector<double> &data2);
 template <class T, class... Images>
 Magick::Image ProcessGrayPixel(T &&functor, const Magick::Image &image,
                                const Images &...additional_images) {
@@ -112,6 +113,143 @@ template <class Container> Container InverseFourier(const Container &data) {
   return res;
 }
 
+inline std::vector<double> LpfData(double fc, std::size_t m) {
+  double D[] = {0.35577019, 0.2436983, 0.07211497, 0.00630165};
+
+  double fact = 2 * fc;
+  std::vector<double> lpw(m + 1);
+
+  lpw[0] = fact;
+
+  double arg = fact * M_PI;
+
+  for (std::size_t i = 1; i < m + 1; ++i) {
+    lpw[i] = std::sin(arg * i) / (M_PI * i);
+  }
+
+  lpw[m - 1] /= 2;
+
+  double sumG = lpw[0];
+
+  for (std::size_t i = 1; i < m + 1; ++i) {
+    double sum = D[0];
+    double arg = M_PI * i / m;
+    for (std::size_t k = 1; k < 4; ++k) {
+      sum += 2 * D[k] * std::cos(arg * k);
+    }
+    lpw[i] *= sum;
+    sumG += 2 * lpw[i];
+  }
+
+  for (std::size_t i = 0; i < m + 1; ++i) {
+    lpw[i] /= sumG;
+  }
+
+  std::vector<double> reversed_lpw(lpw.rbegin() + 1, lpw.rend());
+  reversed_lpw.insert(reversed_lpw.begin(), lpw.begin(), lpw.end() - 1);
+
+  return reversed_lpw;
+}
+
+inline void Trim(std::vector<double> &data, std::size_t trim_count) {
+  data.erase(data.begin(), data.begin() + trim_count);
+  data.resize(data.size() - trim_count);
+}
+
+inline std::vector<std::vector<double>>
+PassFilter2d(const std::vector<std::vector<double>> &data,
+             std::vector<double> filter_data, std::size_t m) {
+  auto res{data};
+
+  for (size_t i = 0; i < data[0].size(); ++i) {
+    std::vector<double> curCol(data.size());
+    for (size_t x = 0; x < curCol.size(); ++x) {
+      curCol[x] = data[x][i];
+    }
+    auto fft = Convolution(curCol, filter_data);
+    Trim(fft, m);
+    for (size_t j = 0; j < res.size(); ++j) {
+      res[j][i] = fft[j];
+    }
+  }
+
+  for (size_t i = 0; i < data.size(); ++i) {
+    std::vector<double> curRow(data[0].size());
+    for (size_t x = 0; x < curRow.size(); ++x) {
+      curRow[x] = res[i][x];
+    }
+    auto fft = Convolution(curRow, filter_data);
+    Trim(fft, m);
+    for (size_t j = 0; j < res[i].size(); ++j) {
+      res[i][j] = fft[j];
+    }
+  }
+
+  return res;
+}
+
+inline std::vector<std::vector<double>>
+Downsize2dVec(const std::vector<std::vector<double>> &vec2d,
+              double multiplier) {
+  const std::size_t old_rows = vec2d.size();
+  const std::size_t old_cols = vec2d[0].size();
+  const std::size_t new_rows = vec2d.size() * multiplier;
+  const std::size_t new_cols = vec2d[0].size() * multiplier;
+
+  const std::size_t shift_rows = old_rows - new_rows;
+  const std::size_t shift_cols = old_cols - new_cols;
+
+  std::vector<std::vector<double>> res(new_rows, std::vector<double>(new_cols));
+
+  for (size_t i = 0; i < new_rows; ++i) {
+    std::size_t new_x = i;
+    if (i >= new_rows / 2) {
+      new_x += shift_rows;
+    }
+
+    for (std::size_t j = 0; j < new_cols; ++j) {
+      std::size_t new_y = j;
+      if (j >= new_cols / 2) {
+        new_y += shift_cols;
+      }
+
+      res[i][j] = vec2d[new_x][new_y];
+    }
+  }
+
+  return res;
+}
+
+inline std::vector<std::vector<double>>
+Upsize2dVec(const std::vector<std::vector<double>> &vec2d, double multiplier) {
+  const std::size_t old_rows = vec2d.size();
+  const std::size_t old_cols = vec2d[0].size();
+  const std::size_t new_rows = vec2d.size() * multiplier;
+  const std::size_t new_cols = vec2d[0].size() * multiplier;
+
+  const std::size_t shift_rows = new_rows - old_rows;
+  const std::size_t shift_cols = new_cols - old_cols;
+
+  std::vector<std::vector<double>> res(new_rows, std::vector<double>(new_cols));
+
+  for (size_t i = 0; i < new_rows; ++i) {
+    for (size_t j = 0; j < new_cols; ++j) {
+      if (i >= old_rows / 2 && i < old_rows / 2 + shift_rows) {
+        res[i][j] = 0;
+      } else if (j >= old_cols / 2 && j < old_cols / 2 + shift_cols) {
+        res[i][j] = 0;
+      } else {
+        const size_t x_pos = i < old_rows ? i : i - shift_rows;
+        const size_t y_pos = j < old_cols ? j : j - shift_cols;
+
+        res[i][j] = vec2d[x_pos][y_pos];
+      }
+    }
+  }
+
+  return res;
+}
+
 inline Magick::Image VecToImage(const std::vector<std::vector<double>> &vec2d) {
   Magick::Image result{Magick::Geometry(vec2d[0].size(), vec2d.size()),
                        Magick::ColorGray{1}};
@@ -170,14 +308,14 @@ ImageTo2dVec(const Magick::Image &image) {
 }
 
 template <class Container>
-Container Fourier2DWithoutSquare(const Container &data) {
+Container Fourier2DWithoutSquare(const Container &data, bool normalize = true) {
   Container res(data);
   for (size_t i = 0; i < data[0].size(); ++i) {
     std::vector<double> curCol(data.size());
     for (size_t x = 0; x < curCol.size(); ++x) {
       curCol[x] = data[x][i];
     }
-    auto fft = FourierWithoutSquare(curCol);
+    auto fft = FourierWithoutSquare(curCol, normalize);
     for (size_t j = 0; j < fft.size(); ++j) {
       res[j][i] = fft[j];
     }
@@ -188,7 +326,7 @@ Container Fourier2DWithoutSquare(const Container &data) {
     for (size_t x = 0; x < curRow.size(); ++x) {
       curRow[x] = res[i][x];
     }
-    auto fft = FourierWithoutSquare(curRow);
+    auto fft = FourierWithoutSquare(curRow, normalize);
     for (size_t j = 0; j < fft.size(); ++j) {
       res[i][j] = fft[j];
     }
@@ -297,6 +435,23 @@ DiagonalShift2d(std::vector<std::vector<double>> matrix, int rowShift,
   return res;
 }
 
+inline std::vector<std::vector<double>>
+DiffModel(const std::vector<std::vector<double>> &data1,
+          const std::vector<std::vector<double>> &data2) {
+  assert(data1.size() == data2.size());
+  assert(data1[0].size() == data2[0].size());
+
+  std::vector<std::vector<double>> res(
+      std::min(data1.size(), data2.size()),
+      std::vector<double>(std::min(data1[0].size(), data2[0].size())));
+  for (size_t i = 0; i < res.size(); ++i) {
+    for (size_t j = 0; j < res[0].size(); ++j) {
+      res[i][j] = std::abs(data1[i][j] - data2[i][j]);
+    }
+  }
+  return res;
+}
+
 inline std::vector<double> MultModel(const std::vector<double> &data1,
                                      const std::vector<double> &data2) {
   std::vector<double> res(data1.size());
@@ -304,6 +459,95 @@ inline std::vector<double> MultModel(const std::vector<double> &data1,
     res[i] = data1[i] * data2[i];
   }
   return res;
+}
+
+inline std::vector<std::vector<int>> MakeErosionKernel(int sz) {
+  std::vector<std::vector<int>> res(sz, std::vector<int>(sz, 1));
+
+  return res;
+}
+
+inline void ThresholdOp(std::vector<std::vector<double>> &img) {
+  for (auto &vec : img) {
+    for (auto &el : vec) {
+      if (el < 65536 * 0.46875) {
+        el = 0;
+      } else {
+        el = 65535;
+      }
+    }
+  }
+}
+
+inline std::vector<std::vector<double>>
+Dilate(std::vector<std::vector<double>> &img,
+       int kernel_size) {
+  std::vector<std::vector<double>> ret(img.size(),
+                                       std::vector<double>(img[0].size(), 0));
+  for (int i = 0; i < img.size(); i++) {
+    for (int j = 0; j < img[0].size(); j++) {
+      // compute ret[i][j]
+      ret[i][j] = img[i][j];
+      for (int muli = -1; muli < 1; muli++) {
+        for (int mulj = -1; mulj < 1; mulj++) {
+          if (i + muli >= 0 && j + mulj >= 0 && i + muli < img.size() && j + mulj < img[0].size()) {
+            ret[i][j] = std::max(ret[i][j], img[i + muli][j + mulj]);
+          }
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+inline std::vector<std::vector<double>>
+Erode(std::vector<std::vector<double>> &img,
+      int kernel_size) {
+  std::vector<std::vector<double>> ret(img.size(),
+                                       std::vector<double>(img[0].size(), 0));
+  for (int i = 0; i < img.size(); i++) {
+    for (int j = 0; j < img[0].size(); j++) {
+      // compute ret[i][j]
+      ret[i][j] = img[i][j];
+      for (int muli = -1; muli < 1; muli++) {
+        for (int mulj = -1; mulj < 1; mulj++) {
+          if (i + muli >= 0 && j + mulj >= 0 && i + muli < img.size() && j + mulj < img[0].size()) {
+            ret[i][j] = std::min(ret[i][j], img[i + muli][j + mulj]);
+          }
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+inline std::vector<std::vector<double>>
+Convolution2D(std::vector<std::vector<double>> &img,
+              const std::vector<std::vector<double>> &kernel_x,
+              const std::vector<std::vector<double>> &kernel_y) {
+  assert(kernel_x.size() == kernel_y.size());
+  assert(kernel_x[0].size() == kernel_y[0].size());
+
+  int out_h = img.size() - kernel_x.size() + 1;
+  int out_w = img[0].size() - kernel_x[0].size() + 1;
+  std::vector<std::vector<double>> ret(out_h, std::vector<double>(out_w, 0));
+  for (int i = 0; i < out_h; i++) {
+    for (int j = 0; j < out_w; j++) {
+      // compute ret[i][j]
+      double temp_x = 0;
+      double temp_y = 0;
+      for (int muli = 0; muli < kernel_x.size(); muli++) {
+        for (int mulj = 0; mulj < kernel_x[0].size(); mulj++) {
+          temp_x += img[i + muli][j + mulj] * kernel_x[muli][mulj];
+          temp_y += img[i + muli][j + mulj] * kernel_y[muli][mulj];
+        }
+      }
+
+      ret[i][j] =
+          std::min<double>(65536, std::sqrt(temp_x * temp_x + temp_y * temp_y));
+    }
+  }
+  return ret;
 }
 
 inline std::vector<double> Convolution(const std::vector<double> &data1,
@@ -434,8 +678,8 @@ inline std::vector<double> ReadDataFile(std::string path) {
   return {};
 }
 
-inline std::vector<std::vector<double>> FormImage(std::vector<double> data, int rows,
-                                           int cols) {
+inline std::vector<std::vector<double>> FormImage(std::vector<double> data,
+                                                  int rows, int cols) {
   std::vector<std::vector<double>> res(rows, std::vector<double>(cols));
 
   int pos = 0;

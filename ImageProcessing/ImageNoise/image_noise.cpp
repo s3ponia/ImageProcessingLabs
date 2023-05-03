@@ -12,7 +12,7 @@ Magick::Image GenerateSaltNoise(const Magick::Image &image) {
   return ProcessGrayPixel(
       [&](auto pixel) {
         auto rand_val = uniform_dist(e1);
-        if (rand_val > 90) {
+        if (rand_val > 98) {
           return Magick::ColorGray{1. * ((rand_val - 90) / 5)};
         } else {
           return pixel;
@@ -23,7 +23,7 @@ Magick::Image GenerateSaltNoise(const Magick::Image &image) {
 
 Magick::Image GenerateNormalNoise(const Magick::Image &image) {
   std::default_random_engine e1(std::random_device{}());
-  std::normal_distribution<> uniform_dist(0, 0.2);
+  std::normal_distribution<> uniform_dist(-0.0002, 0.0002);
 
   return ProcessGrayPixel(
       [&](auto pixel) {
