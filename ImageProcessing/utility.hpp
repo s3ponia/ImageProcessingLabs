@@ -273,10 +273,13 @@ inline Magick::Image VecToImage(const std::vector<std::vector<double>> &vec2d) {
     }
   }
 
+  max = std::min(65536., max);
+  min = std::max(0., min);
+
   for (std::size_t y = 0; y < geometry.height(); ++y) {
     for (std::size_t x = 0; x < geometry.width(); ++x) {
       auto &pixel = *(pixels + get_off(geometry, x, y));
-      pixel = Magick::ColorGray((vec2d[y][x] - min) / (max - min));
+      pixel = Magick::ColorGray((std::clamp(vec2d[y][x], 0., 65536.) - min) / (max - min));
     }
   }
 
@@ -446,7 +449,7 @@ DiffModel(const std::vector<std::vector<double>> &data1,
       std::vector<double>(std::min(data1[0].size(), data2[0].size())));
   for (size_t i = 0; i < res.size(); ++i) {
     for (size_t j = 0; j < res[0].size(); ++j) {
-      res[i][j] = std::abs(data1[i][j] - data2[i][j]);
+      res[i][j] = std::min(65536., std::max(0., data1[i][j] - data2[i][j]));
     }
   }
   return res;
@@ -665,10 +668,11 @@ ImageRestore(std::vector<std::vector<double>> data, std::vector<double> h_func,
   return res;
 }
 
-inline std::vector<double> ReadDataFile(std::string path) {
+template<class T = float>
+std::vector<double> ReadDataFile(std::string path) {
   if (std::ifstream is{path, std::ios::binary | std::ios::ate}) {
     auto size = is.tellg();
-    std::vector<float> res(size);
+    std::vector<T> res(size);
     is.seekg(0);
     if (is.read((char *)res.data(), size)) {
       return {res.begin(), res.end()};

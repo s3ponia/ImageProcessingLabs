@@ -76,11 +76,17 @@ Magick::Image readFile(const std::filesystem::path &path,
     } else {
       throw std::logic_error{"geometry must be specified for .xcr files"};
     }
-  } else if (path.extension() == ".dat") {
+  } else if (path.extension() == ".dat" || path.extension() == ".bin") {
     if (geometry) {
-      return image_processing::VecToImage(
-          image_processing::FormImage(image_processing::ReadDataFile(path),
-                                      geometry->height(), geometry->width()));
+      if (path.extension() == ".dat") {
+        return image_processing::VecToImage(
+            image_processing::FormImage(image_processing::ReadDataFile(path),
+                                        geometry->height(), geometry->width()));
+      } else {
+        return image_processing::VecToImage(image_processing::FormImage(
+            image_processing::ReadDataFile<uint16_t>(path), geometry->height(),
+            geometry->width()));
+      }
     } else {
       throw std::logic_error{"geometry must be specified for .xcr files"};
     }
@@ -452,11 +458,13 @@ int main(int argc, char **argv) {
   } else if (runtime_type == "lab13_eros") {
     auto vec = image_processing::ImageTo2dVec(image);
 
+    const auto r_param = program.get<double>("-R");
+
     image_processing::ThresholdOp(vec);
 
     auto cp = vec;
 
-    vec = image_processing::Erode(vec, 3);
+    vec = image_processing::Erode(vec, r_param);
 
     image = image_processing::VecToImage(image_processing::DiffModel(cp, vec));
   } else if (runtime_type == "lab13_dilate") {
@@ -469,6 +477,39 @@ int main(int argc, char **argv) {
     vec = image_processing::Dilate(vec, 3);
 
     image = image_processing::VecToImage(image_processing::DiffModel(cp, vec));
+  } else if (runtime_type == "spec_1") {
+    // std::vector<std::vector<double>> kernel_x = {
+    //     {-1, -2, -1}, {0, 0, 0}, {1, 2, 1}};
+
+    // std::vector<std::vector<double>> kernel_y = {
+    //     {-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}};
+
+    std::vector<std::vector<double>> kernel_x = {
+        {-1, -1, -1}, {0, 0, 0}, {1, 1, 1}};
+
+    std::vector<std::vector<double>> kernel_y = {
+        {-1, 0, 1}, {-1, 0, 1}, {-1, 0, 1}};
+
+    auto vec = image_processing::ImageTo2dVec(image);
+
+    for (auto &vec_el : vec) {
+      for (auto &el : vec_el) {
+        if (el < 3000) {
+          el = 0;
+        }
+      }
+    }
+
+    const auto equalized = image_processing::ImageTo2dVec(
+        image_processing::Equalize(image_processing::VecToImage(vec)));
+
+    vec = image_processing::Convolution2D(vec, kernel_x, kernel_y);
+    // image_processing::ThresholdOp(vec);
+
+    // image = image_processing::VecToImage(
+    //     image_processing::DiffModel(equalized, vec));
+    // image = image_processing::VecToImage(vec);
+    image = image_processing::VecToImage(equalized);
   } else {
     std::cerr << "Unhandled --type: " << runtime_type << std::endl;
     return 1;
